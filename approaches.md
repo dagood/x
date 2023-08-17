@@ -1,5 +1,7 @@
 # Maintaining a modified x/crypto for swap-in use
 
+These are rough notes I took while looking into forking x/crypto and going over the ideas with the team.
+
 ## Fork
 
 More about why microsoft/go uses a "submodule fork" at https://github.com/microsoft/go-infra/tree/main/docs/fork.
@@ -25,10 +27,14 @@ Use patch files to hold the changes.
 
 Isn't all that compatible with Go modules.
 A Go module download doesn't include the submodule, and certainly doesn't know how to apply loose patch files on top.
-We need some infra to create a "raw" copy of the submodule+patches in the repository for Go to use.
-Example: [submodule](submodule/).
+We need some way to have a "raw" copy.
 
-Tooling that has to be used during ordinary development cycles to "apply" changes to the module isn't ideal for a shared project.
+* We could have the patching tool create a copy during `git go-patch extract` so it's automatically maintained when changes are made. Example: [submodule](submodule/).
+    * Complicated tooling that has to be used during ordinary development cycles to "apply" changes to the module isn't ideal for a shared project. We can at least add a check in CI to point out when it hasn't been done properly, and mention the step needed to take changes applied to the copy and convert them into changes to the patch.
+* We could also periodically "publish" to an external repo that only contains the end result.
+* Best, we think: we could generate the end result directly in our toolset's vendoring directory.
+    * This is also good because it keeps the module as an implementation detail of a specific toolset. The repo binds tightly to specific Go toolset backend internal APIs. If we can prevent someone from referencing it outside this context, that's good for everyone.
+    * We expect that each fork will have different internal calls. So: we can share some basic patches, but patch in our internal implementation on top of that with additional patches just before the result is created in our vendor directory.
 
 ### Multi-repo
 
@@ -39,7 +45,8 @@ Those can be referenced by `go.mod`.
 If our tests don't work on a new baked commit, the infra needs to be fixed up.
 
 This has a similar feel to https://github.com/golang-fips/go.
-In theory this can use patch files, but other approaches fit in nicely and would be more flexible when it comes to conflicts.
+In theory this can use patch files, but other approaches would also fit in nicely and could be more flexible when it comes to conflicts.
+Or: generate some patch files.
 
 ## Wrapper
 
@@ -48,24 +55,38 @@ The wrapper would internally fall back to standard x/crypto if the build isn't u
 
 We could probably generate wrapper code and provide places where humans can fill in replacements for specific functionality.
 
-TODO:
+⚠️ This may cause more work.
+In some cases (e.g. `pkcs12`) the package with the public API doesn't do the crypto work, it's all in an internal package.
+The public API doesn't need to be rewritten for FIPS compliance, just the internal package.
+To avoid forcing a human to rewrite the outer code in the wrapper layer, the wrapper generator needs to be very smart or it needs the edge cases to be specified by hand--and it still needs to be smart to generate the right end result given edge case rules.
+(With a direct fork or patch files, the internal implementation can simply be replaced without any fuss.)
+
+Notes:
 * Can we fall back to the crypto module at its ordinary location?
     * No: "replace x/crypto with golang-fips/xcrypto then golang-fips/xcrypto uses x/crypto" is a circular dependency.
     * Make a local copy as e.g. `internal/x/crypto`? Vendoring somehow?
-        * How do we maintain/update *that*?
+        * We still need to maintain/update that. Similar effort as maintaining a fork.
 * Are there any scenarios that are impossible to pass through using a wrapper?
     * x/crypto is changed into a wrapper when the impl moves to the standard library, so surely we can do this too?
+    * We need to be careful with passthrough.
+        * If we define an error in the wrapper's package and x/crypto returns an error defined in its own package, they need to be identical so `errors.Is` works in the user's code.
 
 # Swapping it in
 
 We have users who expect to be able to use the fork without changing the code they are building.
 Could we vendor one version of our x/crypto fork into the Go toolset and have all usage point to that one version?
 
-Something we have in mind is adding a GOEXPERIMENT that automatically adds a `replace` directive pointing to the vendored library.
+Something we have in mind is adding a GOEXPERIMENT/tag that automatically adds a `replace` directive pointing to the vendored library.
 (Along with other work to make this possible. The vendoring prefix for the standard library may add difficulties.)
 
+We could use go build's `-modfile file` to make this happen.
+Read the existing go.mod (or what was already passed to `-modfile` by the caller), write a new go.mod in temp with the `replace` appended, then pass that in as `-modfile`.
+This seems like it will tie in nicely with the rest of the build system: it would show up in buildinfo and work in other places we don't even know about.
+
+A deeper patch might work and might seem cleaner, but may miss important details and would likely be harder to trace by inspecting the Go binary and other logs.
+
 No matter how this is done, if we end up with an x/crypto fork being shipped along with the toolset, we need to be sure we can update it along with each toolset release, and make sure that the inability to do updates *without* updating the toolset doesn't cause problems.
-E.g. we don't support people using out-of-date major versions of Go, but maybe the situation is significantly worse if we make it so they can't get security fixes to x/crypto?
+We don't support people using out-of-date major versions of Go, but maybe not being able to get x/crypto updates is bad enough that we will be asked to support old versions for this reason?
 
 ## One version
 
@@ -74,6 +95,8 @@ Can we rely on x/crypto APIs being backward compatible?
 All but assured: https://github.com/golang/go/issues/56325.
 
 > In practice, we've been upholding the Go Compatibility Promise in x/crypto for years, so we're effectively already at v1, we just need to call it that.
+
+We need to keep up with the latest x/crypto versions and ensure this is true
 
 ## One wrapper with version-specific behavior
 
