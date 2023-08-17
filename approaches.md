@@ -26,6 +26,7 @@ Use patch files to hold the changes.
 Isn't all that compatible with Go modules.
 A Go module download doesn't include the submodule, and certainly doesn't know how to apply loose patch files on top.
 We need some infra to create a "raw" copy of the submodule+patches in the repository for Go to use.
+Example: [submodule](submodule/).
 
 Tooling that has to be used during ordinary development cycles to "apply" changes to the module isn't ideal for a shared project.
 
@@ -37,6 +38,9 @@ Those can be referenced by `go.mod`.
 
 If our tests don't work on a new baked commit, the infra needs to be fixed up.
 
+This has a similar feel to https://github.com/golang-fips/go.
+In theory this can use patch files, but other approaches fit in nicely and would be more flexible when it comes to conflicts.
+
 ## Wrapper
 
 We could make a wrapper around x/crypto that has the same API as x/crypto.
@@ -45,7 +49,8 @@ The wrapper would internally fall back to standard x/crypto if the build isn't u
 We could probably generate wrapper code and provide places where humans can fill in replacements for specific functionality.
 
 TODO:
-* Can we fall back to the crypto module at its ordinary location? Or is "replace x/crypto with golang-fips/xcrypto then golang-fips/xcrypto uses x/crypto" a circular dependency?
+* Can we fall back to the crypto module at its ordinary location?
+    * No: "replace x/crypto with golang-fips/xcrypto then golang-fips/xcrypto uses x/crypto" is a circular dependency.
     * Make a local copy as e.g. `internal/x/crypto`? Vendoring somehow?
         * How do we maintain/update *that*?
 * Are there any scenarios that are impossible to pass through using a wrapper?
