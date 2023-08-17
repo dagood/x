@@ -29,7 +29,7 @@ Isn't all that compatible with Go modules.
 A Go module download doesn't include the submodule, and certainly doesn't know how to apply loose patch files on top.
 We need some way to have a "raw" copy.
 
-* We could have the patching tool create a copy during `git go-patch extract` so it's automatically maintained when changes are made. Example: [submodule](submodule/).
+* We could have the patching tool create a copy during `git go-patch extract` so it's automatically maintained when changes are made.
     * Complicated tooling that has to be used during ordinary development cycles to "apply" changes to the module isn't ideal for a shared project. We can at least add a check in CI to point out when it hasn't been done properly, and mention the step needed to take changes applied to the copy and convert them into changes to the patch.
 * We could also periodically "publish" to an external repo that only contains the end result.
 * Best, we think: we could generate the end result directly in our toolset's vendoring directory.

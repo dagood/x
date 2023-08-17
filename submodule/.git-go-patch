@@ -2,6 +2,5 @@
   "MinimumToolVersion": "v1.0.1",
   "SubmoduleDir": "upstream",
   "PatchesDir": "patches",
-  "StatusFileDir": "artifacts/go-patch",
-  "PatchedCopyDir": "crypto"
+  "StatusFileDir": "artifacts/go-patch"
 }
