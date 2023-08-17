@@ -64,6 +64,12 @@ To avoid forcing a human to rewrite the outer code in the wrapper layer, the wra
 Notes:
 * Can we fall back to the crypto module at its ordinary location?
     * No: "replace x/crypto with golang-fips/xcrypto then golang-fips/xcrypto uses x/crypto" is a circular dependency.
+        * ```
+          $ go run .
+          package cryptowrap-example
+                  imports golang.org/x/crypto/sha3
+                  imports golang.org/x/crypto/sha3: import cycle not allowed
+          ```
     * Make a local copy as e.g. `internal/x/crypto`? Vendoring somehow?
         * We still need to maintain/update that. Similar effort as maintaining a fork.
 * Are there any scenarios that are impossible to pass through using a wrapper?
