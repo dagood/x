@@ -635,12 +635,12 @@ index ab433ba02bfb7e..6b564f3105a179 100644
  
  func TestTypeAlias(t *testing.T) {
 diff --git a/go.mod b/go.mod
-index 294c7e46f65928..227b2d3ab9aa70 100644
+index 294c7e46f65928..612feae919485f 100644
 --- a/go.mod
 +++ b/go.mod
 @@ -1,4 +1,4 @@
 -module golang.org/x/crypto
-+module github.com/dagood/x/crypto
++module github.com/dagood/x/submodule/crypto
  
  go 1.17
  

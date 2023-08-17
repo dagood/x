@@ -1,4 +1,4 @@
-module github.com/dagood/x/crypto
+module github.com/dagood/x/submodule/crypto
 
 go 1.17
 
