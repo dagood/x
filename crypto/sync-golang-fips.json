@@ -1,0 +1,15 @@
+[
+  {
+    "Upstream": "https://go.googlesource.com/crypto",
+    "UpstreamMirror": "https://github.com/golang/crypto",
+    "Target": "https://github.com/dagood/x",
+    "BranchMap": {
+      "master": "main"
+    },
+    "AutoSyncBranches": [
+      "master"
+    ],
+    "MainBranch": "main",
+    "SubmoduleTarget": "crypto/upstream"
+  }
+]
