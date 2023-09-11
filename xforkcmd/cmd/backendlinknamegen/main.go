@@ -19,8 +19,8 @@ import (
 )
 
 var (
-	backendPattern = flag.String("f", "", "backend Go file glob")
-	outputPath     = flag.String("o", "", "output directory")
+	backendPath = flag.String("d", "", "backend directory")
+	outputPath  = flag.String("o", "", "output directory")
 )
 
 // xCryptoBackendMapPrefix is the prefix for command comments. It would be nice
@@ -35,8 +35,12 @@ func main() {
 		flag.Usage()
 		return
 	}
-	if *backendPattern == "" {
-		log.Fatalln("f is required")
+	if *backendPath == "" {
+		var err error
+		*backendPath, err = os.Getwd()
+		if err != nil {
+			log.Fatalln(err)
+		}
 	}
 	if err := run(); err != nil {
 		log.Fatalln(err)
@@ -45,7 +49,7 @@ func main() {
 
 func run() error {
 	fset := token.NewFileSet()
-	matches, err := filepath.Glob(*backendPattern)
+	matches, err := filepath.Glob(filepath.Join(*backendPath, "*.go"))
 	if err != nil {
 		return err
 	}
@@ -55,7 +59,8 @@ func run() error {
 			return err
 		}
 		g := newFileGen(fset, f)
-		if !g.backend() {
+		if g == nil {
+			// Not a backend.
 			continue
 		}
 
@@ -100,20 +105,9 @@ func newFileGen(fset *token.FileSet, f *ast.File) *fileGen {
 		fset: fset,
 		f:    f,
 	}
-	if g.backend() {
-		g.scan()
+	if !g.backend() {
+		return nil
 	}
-	return g
-}
-
-func (g *fileGen) backend() bool {
-	// Super simple heuristic that works for "crypto/internal/backend": does
-	// the file define "Enabled"?
-	enabledDecl := g.f.Scope.Lookup("Enabled")
-	return enabledDecl != nil
-}
-
-func (g *fileGen) scan() {
 	// Scan to find existing imports that are ok to keep.
 	g.okImports = make(map[string]*ast.ImportSpec)
 	_ = astutil.Apply(g.f, func(c *astutil.Cursor) bool {
@@ -139,9 +133,9 @@ func (g *fileGen) scan() {
 		return true
 	}, nil)
 
-	// Scan to find type names that are declared in this package. They are
-	// forbidden: either they are type aliases for internal types, or
-	// placeholders for the nobackend. Neither should be used in the output.
+	// Scan for type names declared in this package. They are forbidden:
+	// either they are type aliases for internal types, or placeholders for
+	// the nobackend. Neither should be used in the output.
 	g.localPackageType = make(map[string]*ast.TypeSpec)
 	_ = astutil.Apply(g.f, func(c *astutil.Cursor) bool {
 		switch n := (c.Node()).(type) {
@@ -158,6 +152,14 @@ func (g *fileGen) scan() {
 		}
 		return false
 	}, nil)
+	return g
+}
+
+func (g *fileGen) backend() bool {
+	// Super simple heuristic that works for "crypto/internal/backend": does
+	// the file define "Enabled"?
+	enabledDecl := g.f.Scope.Lookup("Enabled")
+	return enabledDecl != nil
 }
 
 func (g *fileGen) write(w io.Writer) error {
