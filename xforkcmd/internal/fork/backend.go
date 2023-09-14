@@ -446,11 +446,15 @@ func deepCopyExpression[T ast.Expr](src T) (T, error) {
 	var err error
 	var f func(ast.Expr) ast.Expr
 	f = func(src ast.Expr) ast.Expr {
+		if src == nil {
+			return nil
+		}
 		switch src := src.(type) {
 
 		case *ast.ArrayType:
 			return &ast.ArrayType{
 				Elt: f(src.Elt),
+				Len: f(src.Len),
 			}
 
 		case *ast.FuncType:
@@ -478,6 +482,12 @@ func deepCopyExpression[T ast.Expr](src T) (T, error) {
 				Sel: f(src.Sel).(*ast.Ident),
 			}
 
+		case *ast.BasicLit:
+			return &ast.BasicLit{
+				Kind:  src.Kind,
+				Value: src.Value,
+			}
+
 		case *ast.StarExpr:
 			return &ast.StarExpr{
 				X: f(src.X),
@@ -488,8 +498,7 @@ func deepCopyExpression[T ast.Expr](src T) (T, error) {
 	}
 	r := f(src)
 	if err != nil {
-		var zero T
-		return zero, err
+		return *new(T), err
 	}
 	return r.(T), nil
 }

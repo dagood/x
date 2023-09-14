@@ -31,17 +31,17 @@ func NewSHA3_256() hash.Hash {
 	panic("not implemented by this backend")
 }
 //go:linkname SHA1 crypto/internal/backend.SHA1
-func SHA1(p []byte) (sum []byte)
+func SHA1(p []byte) (sum [20]byte)
 //go:linkname SHA224 crypto/internal/backend.SHA224
-func SHA224(p []byte) (sum []byte)
+func SHA224(p []byte) (sum [28]byte)
 //go:linkname SHA256 crypto/internal/backend.SHA256
-func SHA256(p []byte) (sum []byte)
+func SHA256(p []byte) (sum [32]byte)
 //go:linkname SHA384 crypto/internal/backend.SHA384
-func SHA384(p []byte) (sum []byte)
+func SHA384(p []byte) (sum [48]byte)
 //go:linkname SHA512 crypto/internal/backend.SHA512
-func SHA512(p []byte) (sum []byte)
+func SHA512(p []byte) (sum [64]byte)
 // Not implemented by this backend.
-func SHA3_256(p []byte) (sum []byte) {
+func SHA3_256(p []byte) (sum [64]byte) {
 	panic("not implemented by this backend")
 }
 //go:linkname NewHMAC crypto/internal/backend.NewHMAC
