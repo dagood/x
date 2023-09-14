@@ -7,6 +7,8 @@
 //	NewSHA3_256
 //	SHA3_256
 
+//go:build goexperiment.boringcrypto && linux && cgo && (amd64 || arm64) && !android && !msan
+
 package backend
 
 import (

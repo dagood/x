@@ -2,6 +2,8 @@
 
 // This file implements a proxy that links into a specific crypto backend.
 
+//go:build goexperiment.cngcrypto && windows
+
 package backend
 
 import (

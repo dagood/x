@@ -2,6 +2,8 @@
 
 // This file implements a proxy that links into a specific crypto backend.
 
+//go:build !(goexperiment.boringcrypto && linux && cgo && (amd64 || arm64) && !android && !msan) && !(goexperiment.cngcrypto && windows) && !(goexperiment.opensslcrypto && linux && cgo)
+
 package backend
 
 import (

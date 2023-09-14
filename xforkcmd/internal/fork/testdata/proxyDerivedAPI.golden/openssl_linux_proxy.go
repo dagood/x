@@ -2,6 +2,8 @@
 
 // This file implements a proxy that links into a specific crypto backend.
 
+//go:build goexperiment.opensslcrypto && linux && cgo
+
 package backend
 
 import (

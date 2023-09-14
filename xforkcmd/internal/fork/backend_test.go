@@ -47,7 +47,7 @@ func TestPlaceholderGeneration(t *testing.T) {
 		t.Fatal(err)
 	}
 	var sb strings.Builder
-	if err := b.Write(&sb); err != nil {
+	if err := b.Format(&sb); err != nil {
 		t.Fatal(err)
 	}
 	got := sb.String()
@@ -80,7 +80,7 @@ func TestBackendFile_ProxyAPI(t *testing.T) {
 				t.Fatal(err)
 			}
 			var sb strings.Builder
-			if err := proxy.Write(&sb); err != nil {
+			if err := proxy.Format(&sb); err != nil {
 				t.Fatal(err)
 			}
 			got := sb.String()

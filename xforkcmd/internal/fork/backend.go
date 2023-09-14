@@ -62,11 +62,16 @@ func FindBackendFiles(dir string) ([]*BackendFile, error) {
 	return backends, nil
 }
 
+type FormattedWriterTo interface {
+	Format(w io.Writer) error
+}
+
 var errNotBackend = errors.New("not a crypto backend file")
 
 type BackendFile struct {
 	// Filename is the absolute path to the original file.
-	Filename string
+	Filename   string
+	Constraint string
 
 	f    *ast.File
 	fset *token.FileSet
@@ -87,6 +92,15 @@ func NewBackendFile(filename string) (*BackendFile, error) {
 	enabledDecl := f.Scope.Lookup("Enabled")
 	if enabledDecl == nil {
 		return nil, errNotBackend
+	}
+	// Preserve the build constraint.
+	for _, cg := range f.Comments {
+		for _, c := range cg.List {
+			if strings.HasPrefix(c.Text, "//go:build ") {
+				b.Constraint = c.Text
+				break
+			}
+		}
 	}
 	return b, nil
 }
@@ -177,7 +191,7 @@ func (b *BackendFile) APITrim() error {
 
 // ProxyAPI creates a proxy for b implementing each var/func in the given api.
 // If b is missing some part of api, it is skipped and recorded in the returned
-// BackendProxy to be included in a comment by Write.
+// BackendProxy to be included in a comment by Format.
 //
 // If a func in b uses the "noescape" command, the proxy includes
 // "//go:noescape" on that func.
@@ -294,8 +308,10 @@ func (b *BackendFile) ProxyAPI(api *BackendFile) (*BackendProxy, error) {
 	return p, nil
 }
 
-func (b *BackendFile) Write(w io.Writer) error {
+func (b *BackendFile) Format(w io.Writer) error {
 	io.WriteString(w, "// Generated code. DO NOT EDIT.\n\n")
+	io.WriteString(w, b.Constraint)
+	io.WriteString(w, "\n\n")
 	return write(b.f, b.fset, w)
 }
 
@@ -309,7 +325,7 @@ type BackendProxy struct {
 	missing []*ast.FuncDecl
 }
 
-func (p *BackendProxy) Write(w io.Writer) error {
+func (p *BackendProxy) Format(w io.Writer) error {
 	io.WriteString(w, "// Generated code. DO NOT EDIT.\n\n")
 	io.WriteString(w, "// This file implements a proxy that links into a specific crypto backend.\n\n")
 	if len(p.missing) > 0 {
@@ -321,21 +337,12 @@ func (p *BackendProxy) Write(w io.Writer) error {
 		}
 		io.WriteString(w, "\n")
 	}
+	io.WriteString(w, p.backend.Constraint)
+	io.WriteString(w, "\n\n")
 	return write(p.f, p.fset, w)
 }
 
 func write(f *ast.File, fset *token.FileSet, w io.Writer) error {
-	// Preserve the build constraint. It's in a comment that isn't reachable
-	// from the node tree.
-	for _, cg := range f.Comments {
-		for _, c := range cg.List {
-			if strings.HasPrefix(c.Text, "//go:build ") {
-				io.WriteString(w, c.Text)
-				io.WriteString(w, "\n\n")
-				break
-			}
-		}
-	}
 	// Force the printer to use the comments associated with the nodes by
 	// clearing the cache-like (but not just a cache) Comments slice.
 	f.Comments = nil
