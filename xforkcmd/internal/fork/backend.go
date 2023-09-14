@@ -91,10 +91,10 @@ func NewBackendFile(filename string) (*BackendFile, error) {
 	return b, nil
 }
 
-// PlaceholderTrim changes b to include a placeholder API, following
-// conventions that assume b is a "nobackend" crypto backend. The placeholder
-// API is buildable, but panics if used.
-func (b *BackendFile) PlaceholderTrim() error {
+// APITrim changes b to include a placeholder API, following conventions that
+// assume b is a "nobackend" crypto backend. The placeholder API is buildable,
+// but panics if used.
+func (b *BackendFile) APITrim() error {
 	var err error
 	localPackageType := make(map[string]*ast.TypeSpec)
 	_ = astutil.Apply(b.f, func(c *astutil.Cursor) bool {
@@ -176,7 +176,8 @@ func (b *BackendFile) PlaceholderTrim() error {
 }
 
 // ProxyAPI creates a proxy for b implementing each var/func in the given api.
-// If b is missing some part of api, this method returns an error.
+// If b is missing some part of api, it is skipped and recorded in the returned
+// BackendProxy to be included in a comment by Write.
 //
 // If a func in b uses the "noescape" command, the proxy includes
 // "//go:noescape" on that func.
@@ -236,12 +237,17 @@ func (b *BackendFile) ProxyAPI(api *BackendFile) (*BackendProxy, error) {
 		case *ast.File:
 			return true
 		case *ast.FuncDecl:
+			apiFnType, err := deepCopyExpression(n.Type)
+			if err != nil {
+				return failFalse(err)
+			}
 			// Find the corresponding func in b.
 			o := b.f.Scope.Lookup(n.Name.Name)
 			if o == nil {
-				return failFalse(fmt.Errorf(
-					"missing symbol %q defined at %v",
-					n.Name.Name, api.fset.Position(n.Pos())))
+				p.missing = append(p.missing, n)
+				p.f.Decls = append(p.f.Decls,
+					newPanicFunc(n, apiFnType, "not implemented by this backend"))
+				return false
 			}
 			fn, ok := o.Decl.(*ast.FuncDecl)
 			if !ok {
@@ -299,11 +305,22 @@ type BackendProxy struct {
 
 	f    *ast.File
 	fset *token.FileSet
+
+	missing []*ast.FuncDecl
 }
 
 func (p *BackendProxy) Write(w io.Writer) error {
 	io.WriteString(w, "// Generated code. DO NOT EDIT.\n\n")
 	io.WriteString(w, "// This file implements a proxy that links into a specific crypto backend.\n\n")
+	if len(p.missing) > 0 {
+		io.WriteString(w, "// The following functions defined in the API are not implemented by the backend and panic instead:\n//\n")
+		for _, fn := range p.missing {
+			io.WriteString(w, "//\t")
+			io.WriteString(w, fn.Name.Name)
+			io.WriteString(w, "\n")
+		}
+		io.WriteString(w, "\n")
+	}
 	return write(p.f, p.fset, w)
 }
 
@@ -360,6 +377,31 @@ func cleanImports(f *ast.File) error {
 		return true
 	})
 	return nil
+}
+
+func newPanicFunc(n *ast.FuncDecl, fnType *ast.FuncType, message string) *ast.FuncDecl {
+	return &ast.FuncDecl{
+		Name: ast.NewIdent(n.Name.Name),
+		Type: fnType,
+		Doc: &ast.CommentGroup{
+			List: []*ast.Comment{{Text: "// Not implemented by this backend."}},
+		},
+		Body: &ast.BlockStmt{
+			List: []ast.Stmt{
+				&ast.ExprStmt{
+					X: &ast.CallExpr{
+						Fun: &ast.Ident{Name: "panic"},
+						Args: []ast.Expr{
+							&ast.BasicLit{
+								Kind:  token.STRING,
+								Value: strconv.Quote(message),
+							},
+						},
+					},
+				},
+			},
+		},
+	}
 }
 
 // Deep copy functions for the AST, but without copying token positions.

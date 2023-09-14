@@ -43,7 +43,7 @@ func TestPlaceholderGeneration(t *testing.T) {
 	if err != nil {
 		t.Fatal(err)
 	}
-	if err := b.PlaceholderTrim(); err != nil {
+	if err := b.APITrim(); err != nil {
 		t.Fatal(err)
 	}
 	var sb strings.Builder
@@ -51,26 +51,40 @@ func TestPlaceholderGeneration(t *testing.T) {
 		t.Fatal(err)
 	}
 	got := sb.String()
-	goldentest.Check(t, "go test internal/fork", "testdata/derivedplaceholder.go", got)
+	goldentest.Check(t, "go test internal/fork", "testdata/derivedapi.golden.go", got)
 }
 
-func TestDerivedProxyGeneration(t *testing.T) {
-	b, err := NewBackendFile("testdata/exampleRealBackend/openssl_linux.go")
+func TestBackendFile_ProxyAPI(t *testing.T) {
+	// Note: This uses the golden output of TestPlaceholderGeneration as its input.
+	api, err := NewBackendFile("testdata/derivedapi.golden.go")
 	if err != nil {
 		t.Fatal(err)
 	}
-	api, err := NewBackendFile("testdata/derivedplaceholder.go")
-	if err != nil {
-		t.Fatal(err)
+
+	tests := []struct {
+		name string
+	}{
+		{"boring_linux"},
+		{"cng_windows"},
+		{"openssl_linux"},
+		{"nobackend"},
 	}
-	proxyAPI, err := b.ProxyAPI(api)
-	if err != nil {
-		t.Fatal(err)
+	for _, tt := range tests {
+		t.Run(tt.name, func(t *testing.T) {
+			b, err := NewBackendFile("testdata/exampleRealBackend/" + tt.name + ".go")
+			if err != nil {
+				t.Fatal(err)
+			}
+			proxy, err := b.ProxyAPI(api)
+			if err != nil {
+				t.Fatal(err)
+			}
+			var sb strings.Builder
+			if err := proxy.Write(&sb); err != nil {
+				t.Fatal(err)
+			}
+			got := sb.String()
+			goldentest.Check(t, "go test internal/fork", "testdata/proxyDerivedAPI.golden/"+tt.name+"_proxy.go", got)
+		})
 	}
-	var sb strings.Builder
-	if err := proxyAPI.Write(&sb); err != nil {
-		t.Fatal(err)
-	}
-	got := sb.String()
-	goldentest.Check(t, "go test internal/fork", "testdata/derivedlinuxproxy.go", got)
 }
