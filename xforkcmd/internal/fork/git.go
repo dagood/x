@@ -2,6 +2,7 @@ package fork
 
 import (
 	"bufio"
+	"errors"
 	"fmt"
 	"log"
 	"os"
@@ -14,7 +15,7 @@ func GitCheckoutTo(gitDir, outDir string, prompt bool) error {
 	if err != nil {
 		return err
 	}
-	if err := removeDirContent(outDir, prompt); err != nil {
+	if err := RemoveDirContent(outDir, prompt); err != nil {
 		return err
 	}
 	cmd := exec.Command(
@@ -31,7 +32,7 @@ func GitCheckoutTo(gitDir, outDir string, prompt bool) error {
 	return cmd.Run()
 }
 
-func removeDirContent(dir string, prompt bool) error {
+func RemoveDirContent(dir string, prompt bool) error {
 	if prompt {
 		fmt.Printf("Delete %#q? [y/N] ", dir)
 		s := bufio.NewScanner(os.Stdin)
@@ -46,6 +47,10 @@ func removeDirContent(dir string, prompt bool) error {
 	}
 	entries, err := os.ReadDir(dir)
 	if err != nil {
+		if errors.Is(err, os.ErrNotExist) {
+			// Nothing to do.
+			return nil
+		}
 		return err
 	}
 	for _, entry := range entries {

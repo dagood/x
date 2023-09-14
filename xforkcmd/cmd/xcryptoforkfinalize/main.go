@@ -14,6 +14,8 @@ var cryptoForkRootDir = flag.String("fork", "", "crypto fork root directory")
 var backendDir = flag.String("backend", "", "directory with Go files that implement the backend")
 var outputDir = flag.String("out", "", "output directory")
 
+var dev = flag.Bool("dev", false, "development mode: place files in crypto fork. -out must not be specified")
+
 var autoYes = flag.Bool("y", false, "delete old output and overwrite without prompting")
 
 func main() {
@@ -29,8 +31,15 @@ func main() {
 	if *backendDir == "" {
 		log.Fatalln("missing -backend")
 	}
-	if *outputDir == "" {
-		log.Fatalln("missing -out")
+	if *dev {
+		if *outputDir != "" {
+			log.Fatalln("-dev and -out are mutually exclusive")
+		}
+		*outputDir = *cryptoForkRootDir
+	} else {
+		if *outputDir == "" {
+			log.Fatalln("missing -out")
+		}
 	}
 	if err := run(); err != nil {
 		log.Fatalln(err)
@@ -38,8 +47,15 @@ func main() {
 }
 
 func run() error {
-	if err := fork.GitCheckoutTo(*cryptoForkRootDir, *outputDir, !*autoYes); err != nil {
-		return err
+	proxyDir := filepath.Join(*outputDir, "internal", "backend")
+	if *dev {
+		if err := fork.RemoveDirContent(proxyDir, !*autoYes); err != nil {
+			return err
+		}
+	} else {
+		if err := fork.GitCheckoutTo(*cryptoForkRootDir, *outputDir, !*autoYes); err != nil {
+			return err
+		}
 	}
 	// For now, use the nobackend as a source of truth for the API. This keeps
 	// maintenance cost low while only one Go toolset implements the API.
@@ -64,12 +80,11 @@ func run() error {
 	if backendAPI == nil {
 		return fmt.Errorf("no backend found appears to be nobackend: %v", backends)
 	}
-	backendPath := filepath.Join(*outputDir, "backend")
 	// Create a proxy for each backend.
 	for _, b := range backends {
 		if b == backendAPI {
 			// This is the unimplemented placeholder API, not a proxy. It's ready to write.
-			if err := writeBackend(b, filepath.Join(backendPath, "nobackend.go")); err != nil {
+			if err := writeBackend(b, filepath.Join(proxyDir, "nobackend.go")); err != nil {
 				return err
 			}
 			continue
@@ -78,7 +93,7 @@ func run() error {
 		if err != nil {
 			return err
 		}
-		err = writeBackend(proxy, filepath.Join(backendPath, filepath.Base(b.Filename)))
+		err = writeBackend(proxy, filepath.Join(proxyDir, filepath.Base(b.Filename)))
 		if err != nil {
 			return err
 		}
@@ -87,6 +102,9 @@ func run() error {
 }
 
 func writeBackend(b fork.FormattedWriterTo, path string) error {
+	if err := os.MkdirAll(filepath.Dir(path), 0o777); err != nil {
+		return err
+	}
 	apiFile, err := os.Create(path)
 	if err != nil {
 		return err
