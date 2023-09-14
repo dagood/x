@@ -75,6 +75,8 @@ type BackendFile struct {
 
 	f    *ast.File
 	fset *token.FileSet
+
+	enabledDecl *ast.ValueSpec
 }
 
 func NewBackendFile(filename string) (*BackendFile, error) {
@@ -89,9 +91,15 @@ func NewBackendFile(filename string) (*BackendFile, error) {
 	b.f = f
 	// Super simple heuristic that works for "crypto/internal/backend": does
 	// the file define "Enabled"?
-	enabledDecl := f.Scope.Lookup("Enabled")
-	if enabledDecl == nil {
+	enabledObj := f.Scope.Lookup("Enabled")
+	if enabledObj == nil {
 		return nil, errNotBackend
+	}
+	var ok bool
+	if b.enabledDecl, ok = enabledObj.Decl.(*ast.ValueSpec); !ok {
+		return nil, fmt.Errorf(
+			"found Enabled symbol, but not a ValueSpec: %q defined at %v",
+			enabledObj.Name, b.fset.Position(enabledObj.Pos()))
 	}
 	// Preserve the build constraint.
 	for _, cg := range f.Comments {
@@ -244,6 +252,26 @@ func (b *BackendFile) ProxyAPI(api *BackendFile) (*BackendProxy, error) {
 
 	// Add unsafe import needed for go:linkname.
 	astutil.AddNamedImport(p.fset, p.f, "_", "unsafe")
+
+	// Add Enabled const.
+	if len(b.enabledDecl.Values) != 1 {
+		return nil, fmt.Errorf(
+			"declaration for Enabled %v includes 0 or multiple values",
+			b.fset.Position(b.enabledDecl.Pos()))
+	}
+	v, err := deepCopyExpression(b.enabledDecl.Values[0])
+	if err != nil {
+		return nil, err
+	}
+	p.f.Decls = append(p.f.Decls, &ast.GenDecl{
+		Tok: token.CONST,
+		Specs: []ast.Spec{
+			&ast.ValueSpec{
+				Names:  []*ast.Ident{{Name: "Enabled"}},
+				Values: []ast.Expr{v},
+			},
+		},
+	})
 
 	// For each API, find it in b. If exists, generate linkname "proxy" func.
 	ast.Inspect(api.f, func(n ast.Node) bool {

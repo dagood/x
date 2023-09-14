@@ -11,6 +11,8 @@ import (
 	_ "unsafe"
 	"hash"
 )
+
+const Enabled = true
 //go:linkname NewSHA1 crypto/internal/backend.NewSHA1
 func NewSHA1() hash.Hash
 //go:linkname NewSHA224 crypto/internal/backend.NewSHA224
