@@ -131,7 +131,17 @@ func (b *BackendFile) PlaceholderTrim() error {
 			// So, simply leave it out.
 		}
 		return false
-	}, nil)
+	}, func(c *astutil.Cursor) bool {
+		switch n := (c.Node()).(type) {
+		case *ast.GenDecl:
+			// Removing a ValueSpec or TypeSpec could leave a node with zero
+			// specs. format.Node fails if there are zero specs. Clean it up.
+			if len(n.Specs) == 0 {
+				c.Delete()
+			}
+		}
+		return true
+	})
 	if err != nil {
 		return err
 	}
@@ -166,8 +176,7 @@ func (b *BackendFile) PlaceholderTrim() error {
 }
 
 // ProxyAPI creates a proxy for b implementing each var/func in the given api.
-// If b is missing some part of api, this method will succeed, but the returned
-// proxy object will keep track of the gaps in its data.
+// If b is missing some part of api, this method returns an error.
 //
 // If a func in b uses the "noescape" command, the proxy includes
 // "//go:noescape" on that func.
@@ -177,6 +186,17 @@ func (b *BackendFile) ProxyAPI(api *BackendFile) (*BackendProxy, error) {
 		api:     api,
 		f:       &ast.File{Name: b.f.Name},
 		fset:    token.NewFileSet(),
+	}
+
+	// Keep track of the first err hit by each AST walk in this variable.
+	// Note that walks don't necessarily stop immediately when "return false" is
+	// used, so take care that an error isn't cleared out by a later iteration.
+	var err error
+	failFalse := func(walkErr error) bool {
+		if err == nil && walkErr != nil {
+			err = walkErr
+		}
+		return false
 	}
 
 	// Copy the imports that are used to define the API.
@@ -191,16 +211,26 @@ func (b *BackendFile) ProxyAPI(api *BackendFile) (*BackendProxy, error) {
 				return true
 			}
 		case *ast.ImportSpec:
-			astutil.AddNamedImport(p.fset, p.f, n.Name.Name, n.Path.Value)
+			var name string
+			if n.Name != nil {
+				name = n.Name.Name
+			}
+			path, err := strconv.Unquote(n.Path.Value)
+			if err != nil {
+				return failFalse(err)
+			}
+			astutil.AddNamedImport(p.fset, p.f, name, path)
 		}
 		return false
 	})
+	if err != nil {
+		return nil, err
+	}
 
 	// Add unsafe import needed for go:linkname.
 	astutil.AddNamedImport(p.fset, p.f, "_", "unsafe")
 
 	// For each API, find it in b. If exists, generate linkname "proxy" func.
-	var err error
 	ast.Inspect(api.f, func(n ast.Node) bool {
 		switch n := n.(type) {
 		case *ast.File:
@@ -209,13 +239,15 @@ func (b *BackendFile) ProxyAPI(api *BackendFile) (*BackendProxy, error) {
 			// Find the corresponding func in b.
 			o := b.f.Scope.Lookup(n.Name.Name)
 			if o == nil {
-				p.missing = append(p.missing, n)
-				return false
+				return failFalse(fmt.Errorf(
+					"missing symbol %q defined at %v",
+					n.Name.Name, api.fset.Position(n.Pos())))
 			}
 			fn, ok := o.Decl.(*ast.FuncDecl)
 			if !ok {
-				p.missing = append(p.missing, n)
-				return false
+				return failFalse(fmt.Errorf(
+					"found symbol, but not a function: %q defined at %v",
+					n.Name.Name, api.fset.Position(n.Pos())))
 			}
 			comments := []*ast.Comment{
 				{Text: "//go:linkname " + n.Name.Name + " crypto/internal/backend." + n.Name.Name},
@@ -225,13 +257,21 @@ func (b *BackendFile) ProxyAPI(api *BackendFile) (*BackendProxy, error) {
 				case "noescape":
 					comments = append(comments, &ast.Comment{Text: "//go:noescape"})
 				default:
-					err = fmt.Errorf("unknown command %q (%v)", cmd, b.fset.Position(n.Pos()))
-					return false
+					return failFalse(fmt.Errorf("unknown command %q (%v)", cmd, b.fset.Position(n.Pos())))
 				}
 			}
+			proxyFnType, err := deepCopyExpression(fn.Type)
+			if err != nil {
+				return failFalse(err)
+			}
 			proxyFn := &ast.FuncDecl{
-				Name: n.Name,
-				Type: fn.Type,
+				// Don't use the original data: make sure the token position is
+				// not copied. Including a non-zero position causes the
+				// formatter to write the comment in strange locations within
+				// the function declaration: it tries to reconcile specific
+				// token positions vs. the zero position of the comment.
+				Name: ast.NewIdent(n.Name.Name),
+				Type: proxyFnType,
 				Doc:  &ast.CommentGroup{List: comments},
 			}
 			p.f.Decls = append(p.f.Decls, proxyFn)
@@ -259,8 +299,6 @@ type BackendProxy struct {
 
 	f    *ast.File
 	fset *token.FileSet
-
-	missing []*ast.FuncDecl
 }
 
 func (p *BackendProxy) Write(w io.Writer) error {
@@ -283,7 +321,7 @@ func write(f *ast.File, fset *token.FileSet, w io.Writer) error {
 	}
 	// Force the printer to use the comments associated with the nodes by
 	// clearing the cache-like (but not just a cache) Comments slice.
-	g.f.Comments = nil
+	f.Comments = nil
 	return format.Node(w, fset, f)
 }
 
@@ -322,4 +360,87 @@ func cleanImports(f *ast.File) error {
 		return true
 	})
 	return nil
+}
+
+// Deep copy functions for the AST, but without copying token positions.
+
+func deepCopyFieldList(src *ast.FieldList) (*ast.FieldList, error) {
+	var dst ast.FieldList
+	for _, x := range src.List {
+		xCopy, err := deepCopyField(x)
+		if err != nil {
+			return nil, err
+		}
+		dst.List = append(dst.List, xCopy)
+	}
+	return &dst, nil
+}
+
+func deepCopyField(src *ast.Field) (*ast.Field, error) {
+	var dst ast.Field
+	for _, n := range src.Names {
+		nCopy, err := deepCopyExpression(n)
+		if err != nil {
+			return nil, err
+		}
+		dst.Names = append(dst.Names, nCopy)
+	}
+	var err error
+	dst.Type, err = deepCopyExpression(src.Type)
+	if err != nil {
+		return nil, err
+	}
+	return &dst, nil
+}
+
+func deepCopyExpression[T ast.Expr](src T) (T, error) {
+	var err error
+	var f func(ast.Expr) ast.Expr
+	f = func(src ast.Expr) ast.Expr {
+		switch src := src.(type) {
+
+		case *ast.ArrayType:
+			return &ast.ArrayType{
+				Elt: f(src.Elt),
+			}
+
+		case *ast.FuncType:
+			if src.TypeParams != nil {
+				err = fmt.Errorf("unsupported type params %v", src.TypeParams)
+				return nil
+			}
+			var ft ast.FuncType
+			ft.Params, err = deepCopyFieldList(src.Params)
+			if err != nil {
+				return nil
+			}
+			ft.Results, err = deepCopyFieldList(src.Results)
+			if err != nil {
+				return nil
+			}
+			return &ft
+
+		case *ast.Ident:
+			return ast.NewIdent(src.Name)
+
+		case *ast.SelectorExpr:
+			return &ast.SelectorExpr{
+				X:   f(src.X),
+				Sel: f(src.Sel).(*ast.Ident),
+			}
+
+		case *ast.StarExpr:
+			return &ast.StarExpr{
+				X: f(src.X),
+			}
+		}
+		err = fmt.Errorf("unsupported expression type %T", src)
+		return nil
+	}
+	r := f(src)
+	if err != nil {
+		var zero T
+		return zero, err
+	}
+	return r.(T), nil
 }
