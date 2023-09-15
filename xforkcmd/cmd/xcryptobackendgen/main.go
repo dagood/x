@@ -1,6 +1,7 @@
 package main
 
 import (
+	"errors"
 	"flag"
 	"fmt"
 	"log"
@@ -10,11 +11,17 @@ import (
 	"github.com/dagood/x/xforkcmd/internal/fork"
 )
 
-var cryptoForkRootDir = flag.String("fork", "", "crypto fork root directory")
-var backendDir = flag.String("backend", "", "directory with Go files that implement the backend")
-var outputDir = flag.String("out", "", "output directory")
+var forkRootDir = flag.String("fork", "", "Crypto fork root directory")
+var backendDir = flag.String("backend", "", "Directory with Go files that implement the backend")
+var outDir = flag.String(
+	"out", "",
+	"Output directory\n"+
+		"Creates a copy of the fork in this directory and generates the backend there")
 
-var dev = flag.Bool("dev", false, "development mode: place files in crypto fork. -out must not be specified")
+var onlyAPI = flag.Bool(
+	"api", false,
+	"Only generate the API (nobackend)\n"+
+		"This helps generate a clean API file for use in a toolset-agnostic x/crypto patch")
 
 var autoYes = flag.Bool("y", false, "delete old output and overwrite without prompting")
 
@@ -25,21 +32,16 @@ func main() {
 		flag.Usage()
 		return
 	}
-	if *cryptoForkRootDir == "" {
-		log.Fatalln("missing -fork")
+	rej := func(s string) {
+		fmt.Fprintln(flag.CommandLine.Output(), s)
+		flag.Usage()
+		os.Exit(1)
+	}
+	if *forkRootDir == "" {
+		rej("missing -fork")
 	}
 	if *backendDir == "" {
-		log.Fatalln("missing -backend")
-	}
-	if *dev {
-		if *outputDir != "" {
-			log.Fatalln("-dev and -out are mutually exclusive")
-		}
-		*outputDir = *cryptoForkRootDir
-	} else {
-		if *outputDir == "" {
-			log.Fatalln("missing -out")
-		}
+		rej("missing -backend")
 	}
 	if err := run(); err != nil {
 		log.Fatalln(err)
@@ -47,13 +49,20 @@ func main() {
 }
 
 func run() error {
-	proxyDir := filepath.Join(*outputDir, "internal", "backend")
-	if *dev {
+	var proxyDir string
+	if *outDir == "" {
+		proxyDir = filepath.Join(*forkRootDir, fork.XCryptoBackendProxyPath)
+		fmt.Printf("Not specified: '-out'. Generating backend files in %q\n", proxyDir)
 		if err := fork.RemoveDirContent(proxyDir, !*autoYes); err != nil {
 			return err
 		}
 	} else {
-		if err := fork.GitCheckoutTo(*cryptoForkRootDir, *outputDir, !*autoYes); err != nil {
+		proxyDir = filepath.Join(*outDir, fork.XCryptoBackendProxyPath)
+		fmt.Printf("Specified: '-out'. Creating copy of Git repo to generate proxy in %q\n", proxyDir)
+		if err := fork.RemoveDirContent(*outDir, !*autoYes); err != nil {
+			return err
+		}
+		if err := fork.GitCheckoutTo(*forkRootDir, *outDir); err != nil {
 			return err
 		}
 	}
@@ -78,7 +87,14 @@ func run() error {
 		}
 	}
 	if backendAPI == nil {
-		return fmt.Errorf("no backend found appears to be nobackend: %v", backends)
+		for _, b := range backends {
+			log.Printf("Found backend: %v\n", b.Filename)
+		}
+		return errors.New("no backend found appears to be nobackend")
+	}
+	// Remove toolset-specific information about the API if only generating the API.
+	if *onlyAPI {
+		backendAPI.Constraint = ""
 	}
 	// Create a proxy for each backend.
 	for _, b := range backends {
@@ -87,6 +103,8 @@ func run() error {
 			if err := writeBackend(b, filepath.Join(proxyDir, "nobackend.go")); err != nil {
 				return err
 			}
+			continue
+		} else if *onlyAPI {
 			continue
 		}
 		proxy, err := b.ProxyAPI(backendAPI)

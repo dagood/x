@@ -15,6 +15,9 @@ import (
 	"golang.org/x/tools/go/ast/astutil"
 )
 
+// XCryptoBackendProxyPath is the path within an x/crypto fork of the backend proxy.
+var XCryptoBackendProxyPath = filepath.Join("internal", "backend")
+
 // xCryptoBackendMapPrefix is the prefix for command comments. It would be nice
 // to omit the " ", but the Go formatter adds it back in. (Sometimes? It does
 // in VS Code. It doesn't seem like Go formatters should, though.)
@@ -46,11 +49,7 @@ func FindBackendFiles(dir string) ([]*BackendFile, error) {
 	}
 	var backends []*BackendFile
 	for _, match := range matches {
-		filename, err := filepath.Abs(match)
-		if err != nil {
-			return nil, err
-		}
-		b, err := NewBackendFile(filename)
+		b, err := NewBackendFile(match)
 		if err != nil {
 			if errors.Is(err, errNotBackend) {
 				continue
@@ -338,8 +337,10 @@ func (b *BackendFile) ProxyAPI(api *BackendFile) (*BackendProxy, error) {
 
 func (b *BackendFile) Format(w io.Writer) error {
 	io.WriteString(w, "// Generated code. DO NOT EDIT.\n\n")
-	io.WriteString(w, b.Constraint)
-	io.WriteString(w, "\n\n")
+	if b.Constraint != "" {
+		io.WriteString(w, b.Constraint)
+		io.WriteString(w, "\n\n")
+	}
 	return write(b.f, b.fset, w)
 }
 
@@ -356,6 +357,10 @@ type BackendProxy struct {
 func (p *BackendProxy) Format(w io.Writer) error {
 	io.WriteString(w, "// Generated code. DO NOT EDIT.\n\n")
 	io.WriteString(w, "// This file implements a proxy that links into a specific crypto backend.\n\n")
+	if p.backend.Constraint != "" {
+		io.WriteString(w, p.backend.Constraint)
+		io.WriteString(w, "\n\n")
+	}
 	if len(p.missing) > 0 {
 		io.WriteString(w, "// The following functions defined in the API are not implemented by the backend and panic instead:\n//\n")
 		for _, fn := range p.missing {
@@ -365,8 +370,6 @@ func (p *BackendProxy) Format(w io.Writer) error {
 		}
 		io.WriteString(w, "\n")
 	}
-	io.WriteString(w, p.backend.Constraint)
-	io.WriteString(w, "\n\n")
 	return write(p.f, p.fset, w)
 }
 

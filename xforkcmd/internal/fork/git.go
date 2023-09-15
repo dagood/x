@@ -10,12 +10,9 @@ import (
 	"path/filepath"
 )
 
-func GitCheckoutTo(gitDir, outDir string, prompt bool) error {
+func GitCheckoutTo(gitDir, outDir string) error {
 	outDir, err := filepath.Abs(outDir)
 	if err != nil {
-		return err
-	}
-	if err := RemoveDirContent(outDir, prompt); err != nil {
 		return err
 	}
 	cmd := exec.Command(
